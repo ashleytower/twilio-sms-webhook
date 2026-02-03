@@ -7,7 +7,8 @@ const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const BASE_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
 
 /**
- * Send approval request to Telegram with inline buttons
+ * Send approval request to Telegram with web link (no webhook needed)
+ * This avoids conflicts with OpenClaw's Telegram long-polling
  */
 export async function sendApprovalRequest(params) {
   const {
@@ -19,23 +20,26 @@ export async function sendApprovalRequest(params) {
     draftReply
   } = params;
 
-  // Format the approval message
+  // Get the webhook URL base for approval links
+  const webhookUrl = process.env.WEBHOOK_URL || 'https://twilio-sms-production-b6b8.up.railway.app';
+  const approvalUrl = `${webhookUrl}/approval/${messageId}`;
+
+  // Format the approval message with link
   const displayName = clientName || 'Unknown';
   const text = formatApprovalMessage({
     displayName,
     phoneNumber,
     incomingBody,
     calendarContext,
-    draftReply
+    draftReply,
+    approvalUrl
   });
 
-  // Create inline keyboard
+  // Use inline keyboard with URL button (no callback, just opens link)
   const keyboard = {
     inline_keyboard: [
       [
-        { text: 'Approve', callback_data: `approve:${messageId}` },
-        { text: 'Edit', callback_data: `edit:${messageId}` },
-        { text: 'Reject', callback_data: `reject:${messageId}` }
+        { text: '📝 Review & Approve', url: approvalUrl }
       ]
     ]
   };
@@ -71,18 +75,19 @@ export async function sendApprovalRequest(params) {
  * Format the approval message for Telegram
  */
 function formatApprovalMessage(params) {
-  const { displayName, phoneNumber, incomingBody, calendarContext, draftReply } = params;
+  const { displayName, phoneNumber, incomingBody, calendarContext, draftReply, approvalUrl } = params;
 
-  let text = `<b>SMS from ${escapeHtml(displayName)}</b>\n`;
-  text += `(${escapeHtml(phoneNumber)})\n\n`;
+  let text = `<b>📱 SMS from ${escapeHtml(displayName)}</b>\n`;
+  text += `<code>${escapeHtml(phoneNumber)}</code>\n\n`;
   text += `<blockquote>${escapeHtml(incomingBody)}</blockquote>\n\n`;
 
   if (calendarContext) {
-    text += `<b>Calendar:</b>\n${escapeHtml(calendarContext)}\n\n`;
+    text += `<b>📅 Calendar:</b>\n${escapeHtml(calendarContext)}\n\n`;
   }
 
-  text += `<b>Draft reply:</b>\n`;
-  text += `<i>"${escapeHtml(draftReply)}"</i>`;
+  text += `<b>💬 Draft reply:</b>\n`;
+  text += `<i>"${escapeHtml(draftReply)}"</i>\n\n`;
+  text += `<a href="${approvalUrl}">Click to review, edit, or approve</a>`;
 
   return text;
 }

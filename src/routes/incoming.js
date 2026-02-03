@@ -84,8 +84,8 @@ async function processIncomingMessage(message) {
       calendarContext
     });
 
-    // Store draft
-    const draftMessage = await storeDraftReply(conversation.id, draftReply);
+    // Store draft with incoming message for reference
+    const draftMessage = await storeDraftReply(conversation.id, draftReply, message.body);
 
     // Send to Telegram for approval
     await sendApprovalRequest({

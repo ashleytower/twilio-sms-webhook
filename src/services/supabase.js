@@ -89,15 +89,15 @@ export async function storeIncomingMessage(conversationId, twilioSid, body, medi
 /**
  * Store a draft reply pending approval
  */
-export async function storeDraftReply(conversationId, draftBody) {
+export async function storeDraftReply(conversationId, draftBody, incomingBody = null) {
   const { data, error } = await supabase
     .from('sms_messages')
     .insert({
       conversation_id: conversationId,
       direction: 'outbound',
-      body: '',
-      draft_body: draftBody,
-      status: 'pending_approval'
+      body: draftBody,
+      incoming_body: incomingBody,
+      status: 'draft'
     })
     .select()
     .single();
@@ -116,11 +116,11 @@ export async function storeDraftReply(conversationId, draftBody) {
 export async function approveMessage(messageId, finalBody = null) {
   const { data: existing } = await supabase
     .from('sms_messages')
-    .select('draft_body')
+    .select('body')
     .eq('id', messageId)
     .single();
 
-  const body = finalBody || existing?.draft_body || '';
+  const body = finalBody || existing?.body || '';
 
   const { data, error } = await supabase
     .from('sms_messages')

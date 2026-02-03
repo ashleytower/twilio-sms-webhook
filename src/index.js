@@ -11,8 +11,8 @@ const app = express();
 app.use('/incoming', express.urlencoded({ extended: false }));
 app.use('/status', express.urlencoded({ extended: false }));
 
-// JSON for Telegram webhooks
-app.use('/approval', express.json());
+// URL-encoded for web approval form
+app.use('/approval', express.urlencoded({ extended: false }));
 
 // Health check
 app.get('/health', (req, res) => {
