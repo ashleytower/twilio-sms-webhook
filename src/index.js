@@ -19,6 +19,17 @@ app.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
 
+// Voice call forwarding
+app.all('/voice', (req, res) => {
+  const forwardTo = process.env.FORWARD_TO_NUMBER || '+15146647557';
+  res.type('text/xml');
+  res.send(`<?xml version="1.0" encoding="UTF-8"?>
+<Response>
+  <Say voice="alice">Please hold while I connect you.</Say>
+  <Dial callerId="+14382557557">${forwardTo}</Dial>
+</Response>`);
+});
+
 // Routes
 app.use('/incoming', incomingRouter);
 app.use('/status', statusRouter);
