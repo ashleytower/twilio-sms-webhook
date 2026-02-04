@@ -52,9 +52,15 @@ export async function generateDraftReply(params) {
  * Build system prompt for draft generation
  */
 function buildSystemPrompt(businessContext) {
-  return `You are Max, an AI assistant for MTL Craft Cocktails, a mobile bartending service in Montreal.
+  return `You are Max, a bilingual AI assistant for MTL Craft Cocktails, a mobile bartending service in Montreal.
 
 Your task: Write a brief, friendly SMS reply to a client inquiry.
+
+LANGUAGE RULES (CRITICAL):
+- Detect the language of the incoming message
+- Reply in the SAME language (French or English)
+- If French, respond entirely in French
+- If English, respond entirely in English
 
 Guidelines:
 - Keep it under 160 characters when possible (SMS length)
@@ -105,6 +111,20 @@ function buildUserPrompt(params) {
 function generateFallbackReply(incomingMessage) {
   const lower = incomingMessage.toLowerCase();
 
+  // Detect French
+  const isFrench = /bonjour|salut|merci|prix|disponible|événement|fête|mariage|réservation/.test(lower);
+
+  if (isFrench) {
+    if (lower.includes('prix') || lower.includes('coût') || lower.includes('tarif')) {
+      return "Merci de nous contacter! Nos forfaits varient selon l'événement. Pouvez-vous m'en dire plus?";
+    }
+    if (lower.includes('disponible') || lower.includes('réserv')) {
+      return "Bonjour! Oui, on serait ravis de vous aider. C'est pour quelle date?";
+    }
+    return "Merci pour votre message! Je reviens vers vous sous peu.";
+  }
+
+  // English fallbacks
   if (lower.includes('price') || lower.includes('cost') || lower.includes('rate')) {
     return "Thanks for reaching out! Our packages vary by event size. Can you tell me more about what you're planning?";
   }
