@@ -19,7 +19,8 @@ export async function generateDraftReply(params) {
     calendarContext
   } = params;
 
-  const systemPrompt = buildSystemPrompt(businessContext);
+  const detectedLanguage = detectLanguage(incomingMessage);
+  const systemPrompt = buildSystemPrompt(businessContext, detectedLanguage);
   const userPrompt = buildUserPrompt({
     incomingMessage,
     clientName,
@@ -51,16 +52,16 @@ export async function generateDraftReply(params) {
 /**
  * Build system prompt for draft generation
  */
-function buildSystemPrompt(businessContext) {
+function buildSystemPrompt(businessContext, language) {
+  const langDirective = language === 'fr'
+    ? 'RESPOND ENTIRELY IN FRENCH. The client wrote in French.'
+    : 'RESPOND ENTIRELY IN ENGLISH. The client wrote in English.';
+
   return `You are Max, a bilingual AI assistant for MTL Craft Cocktails, a mobile bartending service in Montreal.
 
 Your task: Write a brief, friendly SMS reply to a client inquiry.
 
-LANGUAGE RULES (CRITICAL):
-- Detect the language of the incoming message
-- Reply in the SAME language (French or English)
-- If French, respond entirely in French
-- If English, respond entirely in English
+LANGUAGE: ${langDirective}
 
 Guidelines:
 - Keep it under 160 characters when possible (SMS length)
@@ -103,6 +104,15 @@ function buildUserPrompt(params) {
   prompt += 'Write a friendly SMS reply:';
 
   return prompt;
+}
+
+/**
+ * Detect language from message text
+ */
+function detectLanguage(text) {
+  const lower = text.toLowerCase();
+  const frenchIndicators = /[àâéèêëïîôùûüç]|bonjour|salut|merci|bonsoir|s'il vous|svp|oui|est-ce que|je voudrais|nous cherchons|disponible|événement|fête|mariage|réservation|prix|tarif|soirée|cocktails? pour/;
+  return frenchIndicators.test(lower) ? 'fr' : 'en';
 }
 
 /**
