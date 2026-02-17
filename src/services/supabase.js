@@ -5,8 +5,10 @@ const logger = createLogger('supabase');
 
 const supabase = createClient(
   process.env.SUPABASE_URL,
-  process.env.SUPABASE_SERVICE_ROLE_KEY
+  process.env.SUPABASE_SERVICE_KEY
 );
+
+const DEFAULT_USER_ID = process.env.USER_ID || '3ed111ff-c28f-4cda-b987-1afa4f7eb081';
 
 /**
  * Get or create conversation for a phone number
@@ -36,7 +38,13 @@ export async function getOrCreateConversation(phoneNumber, clientName = null) {
       logger.error({ error: updateError }, 'Failed to update conversation');
     }
 
-    return updated || existing;
+    const convo = updated || existing;
+
+    // Resolve unified contact (fire-and-forget)
+    resolveContact(phoneNumber, null, null, clientName, convo.id)
+      .catch(err => logger.warn({ err }, 'Contact resolution failed'));
+
+    return convo;
   }
 
   // Create new conversation
@@ -57,8 +65,26 @@ export async function getOrCreateConversation(phoneNumber, clientName = null) {
     throw createError;
   }
 
+  // Resolve unified contact (fire-and-forget)
+  resolveContact(phoneNumber, null, null, clientName, newConvo.id)
+    .catch(err => logger.warn({ err }, 'Contact resolution failed'));
+
   logger.info({ phoneNumber, id: newConvo.id }, 'Created new conversation');
   return newConvo;
+}
+
+/**
+ * Check if a message with this Twilio SID already exists (deduplication)
+ */
+export async function checkMessageExists(twilioSid) {
+  const { data } = await supabase
+    .from('sms_messages')
+    .select('id')
+    .eq('twilio_sid', twilioSid)
+    .limit(1)
+    .maybeSingle();
+
+  return !!data;
 }
 
 /**
@@ -89,15 +115,15 @@ export async function storeIncomingMessage(conversationId, twilioSid, body, medi
 /**
  * Store a draft reply pending approval
  */
-export async function storeDraftReply(conversationId, draftBody, incomingBody = null) {
+export async function storeDraftReply(conversationId, draftBody) {
   const { data, error } = await supabase
     .from('sms_messages')
     .insert({
       conversation_id: conversationId,
       direction: 'outbound',
-      body: draftBody,
-      incoming_body: incomingBody,
-      status: 'draft'
+      body: '',
+      draft_body: draftBody,
+      status: 'pending_approval'
     })
     .select()
     .single();
@@ -116,11 +142,11 @@ export async function storeDraftReply(conversationId, draftBody, incomingBody = 
 export async function approveMessage(messageId, finalBody = null) {
   const { data: existing } = await supabase
     .from('sms_messages')
-    .select('body')
+    .select('draft_body')
     .eq('id', messageId)
     .single();
 
-  const body = finalBody || existing?.body || '';
+  const body = finalBody || existing?.draft_body || '';
 
   const { data, error } = await supabase
     .from('sms_messages')
@@ -227,4 +253,65 @@ export async function getMessage(messageId) {
   }
 
   return data;
+}
+
+/**
+ * Search messages for read-only access
+ */
+export async function searchMessages({ query, phone, direction, limit = 20, since }) {
+  let builder = supabase
+    .from('sms_messages')
+    .select('id, conversation_id, direction, body, draft_body, status, created_at, sms_conversations(phone_number, client_name)')
+    .order('created_at', { ascending: false })
+    .limit(limit);
+
+  if (since) {
+    builder = builder.gte('created_at', since);
+  }
+
+  if (direction) {
+    builder = builder.eq('direction', direction);
+  }
+
+  if (phone) {
+    builder = builder.eq('sms_conversations.phone_number', phone);
+  }
+
+  if (query) {
+    const safeQuery = query.replace(/,/g, ' ');
+    builder = builder.or(
+      `body.ilike.%${safeQuery}%,draft_body.ilike.%${safeQuery}%`
+    );
+  }
+
+  const { data, error } = await builder;
+  return { messages: data || [], error };
+}
+
+/**
+ * Resolve or create a unified contact and link to a conversation.
+ */
+async function resolveContact(phone, email, instagram, name, conversationId) {
+  const { data: contactId, error } = await supabase.rpc('resolve_contact', {
+    p_user_id: DEFAULT_USER_ID,
+    p_phone: phone || null,
+    p_email: email || null,
+    p_instagram: instagram || null,
+    p_name: name || null,
+    p_source: 'sms'
+  });
+
+  if (error) {
+    logger.warn({ error }, 'resolve_contact RPC failed');
+    return;
+  }
+
+  if (contactId && conversationId) {
+    await supabase
+      .from('sms_conversations')
+      .update({ contact_id: contactId })
+      .eq('id', conversationId);
+  }
+
+  logger.info({ contactId, conversationId }, 'Unified contact resolved');
 }

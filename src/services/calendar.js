@@ -2,8 +2,16 @@ import { createLogger } from '../utils/logger.js';
 
 const logger = createLogger('calendar');
 
-const RUBE_API_URL = process.env.RUBE_API_URL;
-const RUBE_API_KEY = process.env.RUBE_API_KEY;
+const COMPOSIO_API_URL = 'https://backend.composio.dev/api/v2';
+const COMPOSIO_API_KEY = process.env.COMPOSIO_API_KEY || process.env.RUBE_API_KEY;
+const COMPOSIO_CALENDAR_ACCOUNT_ID = process.env.COMPOSIO_CALENDAR_ACCOUNT_ID;
+
+const CALENDAR_IDS = [
+  'ash.cocktails@gmail.com',
+  '866fb488b774383512064a7c7a9404c07c59e94bba90621bf64e8da0fd67a3f7@group.calendar.google.com',
+  'f7ea264384d41207c299be419cc98efcaaa1ec6ccfa10854e2f4446d9f417e29@group.calendar.google.com',
+  'c_749cd4153a2f84021fb73f9b12b43d6643e265a6577d9e79451c0df584f3b138@group.calendar.google.com',
+];
 
 /**
  * Get calendar context for a date mentioned in a message
@@ -94,44 +102,74 @@ function extractDateReference(text) {
 }
 
 /**
- * Get events for a specific date via Rube/Google Calendar
+ * Get events for a specific date via Composio REST API (Google Calendar)
+ * Queries multiple calendars in parallel for a unified view.
  */
 async function getEventsForDate(date) {
-  if (!RUBE_API_URL || !RUBE_API_KEY) {
-    logger.warn('Rube not configured, skipping calendar');
+  if (!COMPOSIO_API_KEY || !COMPOSIO_CALENDAR_ACCOUNT_ID) {
+    logger.warn('Composio not configured, skipping calendar');
     return [];
   }
 
-  // Create date range for the day
   const startOfDay = new Date(date);
   startOfDay.setHours(0, 0, 0, 0);
 
   const endOfDay = new Date(date);
   endOfDay.setHours(23, 59, 59, 999);
 
+  const timeMin = toRFC3339(startOfDay);
+  const timeMax = toRFC3339(endOfDay);
+
   try {
-    const response = await fetch(`${RUBE_API_URL}/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RUBE_API_KEY}`
-      },
-      body: JSON.stringify({
-        tool: 'GOOGLE_CALENDAR_LIST_EVENTS',
-        params: {
-          time_min: startOfDay.toISOString(),
-          time_max: endOfDay.toISOString(),
-          max_results: 20
+    const results = await Promise.allSettled(
+      CALENDAR_IDS.map(calId =>
+        fetch(`${COMPOSIO_API_URL}/actions/GOOGLECALENDAR_EVENTS_LIST/execute`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-API-Key': COMPOSIO_API_KEY
+          },
+          body: JSON.stringify({
+            connectedAccountId: COMPOSIO_CALENDAR_ACCOUNT_ID,
+            input: { calendarId: calId, timeMin, timeMax, singleEvents: true, orderBy: 'startTime', maxResults: 20 }
+          })
+        }).then(r => r.json())
+      )
+    );
+
+    const seen = new Set();
+    const events = [];
+    for (const r of results) {
+      if (r.status !== 'fulfilled') continue;
+      const items = r.value?.data?.items || [];
+      for (const e of items) {
+        const eid = e.id || `${e.summary}-${e.start?.dateTime || e.start?.date}`;
+        if (!seen.has(eid)) {
+          seen.add(eid);
+          events.push(e);
         }
-      })
+      }
+    }
+
+    events.sort((a, b) => {
+      const aTime = new Date(a.start?.dateTime || a.start?.date || 0);
+      const bTime = new Date(b.start?.dateTime || b.start?.date || 0);
+      return aTime - bTime;
     });
 
-    const data = await response.json();
-    return data.events || [];
+    return events;
   } catch (error) {
     logger.error({ error }, 'Google Calendar API failed');
     return [];
   }
+}
+
+function toRFC3339(date) {
+  const offset = -date.getTimezoneOffset();
+  const sign = offset >= 0 ? '+' : '-';
+  const hours = String(Math.floor(Math.abs(offset) / 60)).padStart(2, '0');
+  const minutes = String(Math.abs(offset) % 60).padStart(2, '0');
+  return date.toISOString().replace('Z', '') + sign + hours + ':' + minutes;
 }
 
 /**

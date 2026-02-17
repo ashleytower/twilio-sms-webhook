@@ -1,12 +1,8 @@
 import { Router } from 'express';
 import { createLogger } from '../utils/logger.js';
-import { validateTwilioSignature, sanitizePhoneNumber, extractClientName } from '../utils/validation.js';
+import { validateTwilioSignature } from '../utils/validation.js';
 import { parseIncomingMessage, emptyTwiml } from '../services/twilio.js';
-import { getOrCreateConversation, storeIncomingMessage, storeDraftReply, getConversationHistory } from '../services/supabase.js';
-import { searchClientContext, getBusinessContext } from '../services/mem0.js';
-import { getCalendarContext } from '../services/calendar.js';
-import { generateDraftReply } from '../services/claude.js';
-import { sendApprovalRequest } from '../services/telegram.js';
+import { processIncomingMessage } from '../services/smsProcessor.js';
 
 const router = Router();
 const logger = createLogger('incoming');
@@ -42,69 +38,5 @@ router.post('/', async (req, res) => {
     res.send(emptyTwiml());
   }
 });
-
-/**
- * Process incoming message asynchronously
- */
-async function processIncomingMessage(message) {
-  try {
-    const phoneNumber = sanitizePhoneNumber(message.from);
-    const clientName = extractClientName(message.body);
-
-    // Get or create conversation
-    const conversation = await getOrCreateConversation(phoneNumber, clientName);
-
-    // Store incoming message
-    await storeIncomingMessage(
-      conversation.id,
-      message.messageSid,
-      message.body,
-      message.mediaUrls
-    );
-
-    // Gather context in parallel
-    const [
-      clientContext,
-      businessContext,
-      calendarContext,
-      history
-    ] = await Promise.all([
-      searchClientContext(message.body, phoneNumber),
-      getBusinessContext(),
-      getCalendarContext(message.body),
-      getConversationHistory(conversation.id)
-    ]);
-
-    // Generate draft reply
-    const draftReply = await generateDraftReply({
-      incomingMessage: message.body,
-      clientName: conversation.client_name || clientName,
-      businessContext: clientContext ? `${businessContext}\n\nClient notes:\n${clientContext}` : businessContext,
-      conversationHistory: history,
-      calendarContext
-    });
-
-    // Store draft with incoming message for reference
-    const draftMessage = await storeDraftReply(conversation.id, draftReply, message.body);
-
-    // Send to Telegram for approval
-    await sendApprovalRequest({
-      messageId: draftMessage.id,
-      phoneNumber,
-      clientName: conversation.client_name || clientName,
-      incomingBody: message.body,
-      calendarContext,
-      draftReply
-    });
-
-    logger.info({
-      conversationId: conversation.id,
-      draftId: draftMessage.id
-    }, 'SMS processed, awaiting approval');
-
-  } catch (error) {
-    logger.error({ error }, 'Failed to process incoming message');
-  }
-}
 
 export default router;

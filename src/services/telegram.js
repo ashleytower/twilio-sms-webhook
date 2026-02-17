@@ -5,10 +5,10 @@ const logger = createLogger('telegram');
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const BASE_URL = `https://api.telegram.org/bot${BOT_TOKEN}`;
+const APP_BASE_URL = process.env.APP_BASE_URL || 'https://twilio-sms-production-b6b8.up.railway.app';
 
 /**
- * Send approval request to Telegram with web link (no webhook needed)
- * This avoids conflicts with OpenClaw's Telegram long-polling
+ * Send approval request to Telegram with inline buttons
  */
 export async function sendApprovalRequest(params) {
   const {
@@ -17,14 +17,12 @@ export async function sendApprovalRequest(params) {
     clientName,
     incomingBody,
     calendarContext,
-    draftReply
+    draftReply,
+    actionSummary,
+    actionStatus
   } = params;
 
-  // Get the webhook URL base for approval links
-  const webhookUrl = process.env.WEBHOOK_URL || 'https://twilio-sms-production-b6b8.up.railway.app';
-  const approvalUrl = `${webhookUrl}/approval/${messageId}`;
-
-  // Format the approval message with link
+  // Format the approval message
   const displayName = clientName || 'Unknown';
   const text = formatApprovalMessage({
     displayName,
@@ -32,16 +30,15 @@ export async function sendApprovalRequest(params) {
     incomingBody,
     calendarContext,
     draftReply,
-    approvalUrl
+    actionSummary,
+    actionStatus
   });
 
-  // Use inline keyboard with URL button (no callback, just opens link)
+  // Create inline keyboard with URL button to web approval page
   const keyboard = {
-    inline_keyboard: [
-      [
-        { text: '📝 Review & Approve', url: approvalUrl }
-      ]
-    ]
+    inline_keyboard: [[
+      { text: 'Review & Approve', url: `${APP_BASE_URL}/approval/${messageId}` }
+    ]]
   };
 
   try {
@@ -75,19 +72,23 @@ export async function sendApprovalRequest(params) {
  * Format the approval message for Telegram
  */
 function formatApprovalMessage(params) {
-  const { displayName, phoneNumber, incomingBody, calendarContext, draftReply, approvalUrl } = params;
+  const { displayName, phoneNumber, incomingBody, calendarContext, draftReply, actionSummary, actionStatus } = params;
 
-  let text = `<b>📱 SMS from ${escapeHtml(displayName)}</b>\n`;
-  text += `<code>${escapeHtml(phoneNumber)}</code>\n\n`;
+  let text = `<b>SMS from ${escapeHtml(displayName)}</b>\n`;
+  text += `(${escapeHtml(phoneNumber)})\n\n`;
   text += `<blockquote>${escapeHtml(incomingBody)}</blockquote>\n\n`;
 
-  if (calendarContext) {
-    text += `<b>📅 Calendar:</b>\n${escapeHtml(calendarContext)}\n\n`;
+  if (actionSummary) {
+    const statusLabel = actionStatus ? ` (${actionStatus})` : '';
+    text += `<b>Action:</b> ${escapeHtml(actionSummary)}${escapeHtml(statusLabel)}\n\n`;
   }
 
-  text += `<b>💬 Draft reply:</b>\n`;
-  text += `<i>"${escapeHtml(draftReply)}"</i>\n\n`;
-  text += `<a href="${approvalUrl}">Click to review, edit, or approve</a>`;
+  if (calendarContext) {
+    text += `<b>Calendar:</b>\n${escapeHtml(calendarContext)}\n\n`;
+  }
+
+  text += `<b>Draft reply:</b>\n`;
+  text += `<i>"${escapeHtml(draftReply)}"</i>`;
 
   return text;
 }

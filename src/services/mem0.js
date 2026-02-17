@@ -1,44 +1,25 @@
 import { createLogger } from '../utils/logger.js';
+import { searchMemoriesPgvector } from './pgvector.js';
 
 const logger = createLogger('mem0');
 
-const RUBE_API_URL = process.env.RUBE_API_URL;
-const RUBE_API_KEY = process.env.RUBE_API_KEY;
-
 /**
- * Search Mem0 for client context via Rube MCP
+ * Search pgvector for client context.
  */
 export async function searchClientContext(query, phoneNumber = null) {
   try {
-    // Search for relevant memories
-    const searchQuery = phoneNumber
-      ? `${query} phone:${phoneNumber}`
-      : query;
+    const searchQuery = phoneNumber ? `${query} phone:${phoneNumber}` : query;
+    const results = await searchMemoriesPgvector(searchQuery, 0.6, 5);
 
-    const response = await callRubeTool('MEM0_SEARCH', {
-      query: searchQuery,
-      user_id: 'ashley',
-      limit: 5
-    });
-
-    if (!response.success || !response.data?.memories) {
+    if (!results || results.length === 0) {
       return null;
     }
 
-    const memories = response.data.memories;
-    if (memories.length === 0) {
-      return null;
-    }
-
-    // Format memories as context
-    const context = memories
-      .map(m => `- ${m.memory}`)
-      .join('\n');
-
-    logger.info({ count: memories.length }, 'Found Mem0 context');
+    const context = results.map(r => `- ${r.content}`).join('\n');
+    logger.info({ count: results.length }, 'Found pgvector context');
     return context;
   } catch (error) {
-    logger.error({ error }, 'Mem0 search failed');
+    logger.error({ error }, 'pgvector search failed');
     return null;
   }
 }
@@ -48,24 +29,14 @@ export async function searchClientContext(query, phoneNumber = null) {
  */
 export async function getBusinessContext() {
   try {
-    const response = await callRubeTool('MEM0_SEARCH', {
-      query: 'pricing services packages cocktails events',
-      user_id: 'ashley',
-      limit: 10
-    });
-
-    if (!response.success || !response.data?.memories) {
-      return getDefaultBusinessContext();
+    const results = await searchMemoriesPgvector(
+      'pricing services packages cocktails events workshops syrups bar open bar mixologist',
+      0.6, 15
+    );
+    if (results && results.length > 0) {
+      return results.map(r => r.content).join('\n');
     }
-
-    const memories = response.data.memories;
-    if (memories.length === 0) {
-      return getDefaultBusinessContext();
-    }
-
-    return memories
-      .map(m => m.memory)
-      .join('\n');
+    return getDefaultBusinessContext();
   } catch (error) {
     logger.error({ error }, 'Failed to get business context');
     return getDefaultBusinessContext();
@@ -73,41 +44,32 @@ export async function getBusinessContext() {
 }
 
 /**
- * Default business context if Mem0 fails
+ * Default business context if pgvector fails
  */
 function getDefaultBusinessContext() {
   return `MTL Craft Cocktails - Mobile bartending services in Montreal
-- Event packages available
-- Professional bartenders
-- Custom cocktail menus`;
-}
-
-/**
- * Call a Rube MCP tool
- */
-async function callRubeTool(toolName, params) {
-  if (!RUBE_API_URL || !RUBE_API_KEY) {
-    logger.warn('Rube not configured, skipping Mem0');
-    return { success: false };
-  }
-
-  try {
-    const response = await fetch(`${RUBE_API_URL}/execute`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${RUBE_API_KEY}`
-      },
-      body: JSON.stringify({
-        tool: toolName,
-        params
-      })
-    });
-
-    const data = await response.json();
-    return { success: true, data };
-  } catch (error) {
-    logger.error({ error, tool: toolName }, 'Rube tool call failed');
-    return { success: false, error: error.message };
-  }
+- The Tailored Bar Experience (client supplies alcohol): $15-25/person depending on event type and duration
+- The Ultimate Bar Experience (open bar, we supply alcohol): $30-60/person depending on duration and drinking crowd
+- Premium open bar (Hendrick's, Grey Goose, Casamigos level): $75/person
+- Full mocktail bar (The Drink Without The Drunk): $25/person
+- Consumption bar (per-drink): $12.50/cocktail
+- Standard alcohol we supply: Tequila 1800, Tanqueray gin, Kettle One vodka, Jameson whiskey, Bacardi White rum, Chivas scotch
+- Workshop pricing: $72/person at client location, $89/person at Loft Beauty (Old Port)
+- Handmade syrup prices: 8oz $15, 16oz $25, 26oz $30
+- Bar rental: 4ft $150, 6ft $200, 8ft $300 (delivery included)
+- Glassware rental: ~$1/glass (1 glass/person/hour rule)
+- Everything made from scratch - syrups, shrubs, infusions
+- MK Kosher certified
+- Fully bilingual English and French
+- Completely turnkey: we supply everything
+- Workshop venue: Loft Beauty, 59 Rue de Bresoles, Montreal (Old Port)
+- Workshop min 6 people, max 80 people
+- Setup: 1 hour standard, 2 hours for big events, 3-4 hours for weddings
+- Mixologist rate: $40/hour per mixologist (includes setup and teardown)
+- 1 bartender per 40 guests (scales: 60 guests = 2, 120 guests = 3, etc.)
+- Travel fee: $60 within Montreal, $150 outside Montreal (1h15+)
+- Deposit: 25%, balance due day before event
+- Payment: Credit card via payment link
+- Can send cocktail menu on request
+- Cocktail tastings available for weddings`;
 }

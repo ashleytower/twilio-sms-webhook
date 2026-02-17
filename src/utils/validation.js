@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import twilio from 'twilio';
 
 const { validateRequest } = twilio;
@@ -44,9 +45,10 @@ export function sanitizePhoneNumber(phone) {
  */
 export function extractClientName(body) {
   // Simple patterns like "This is Sarah" or "My name is John"
+  // Prefix is case-insensitive but name must start with uppercase letter
   const patterns = [
-    /(?:this is|my name is|i'm|i am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/i,
-    /^([A-Z][a-z]+)\s+here/i
+    /(?:[Tt]his is|[Mm]y name is|[Ii]'m|[Ii] am)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)/,
+    /^([A-Z][a-z]+)\s+here/
   ];
 
   for (const pattern of patterns) {
@@ -57,4 +59,25 @@ export function extractClientName(body) {
   }
 
   return null;
+}
+
+/**
+ * Validate internal API key for read-only access
+ */
+export function validateApiKey(req) {
+  const expected = process.env.SMS_READ_API_KEY;
+  const provided = req.headers['x-api-key'];
+
+  if (!expected || !provided) {
+    return false;
+  }
+
+  const expectedBuf = Buffer.from(expected);
+  const providedBuf = Buffer.from(provided);
+
+  if (expectedBuf.length !== providedBuf.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(expectedBuf, providedBuf);
 }
